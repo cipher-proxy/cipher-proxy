@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"fmt"
 	"image/color"
 	"log/slog"
 	"net"
@@ -171,15 +172,18 @@ func Run() {
 	// --- Log panel ---------------------------------------------------------
 	var logMu sync.Mutex
 	var allLines []string
-	logLabel := widget.NewLabel("")
-	logLabel.Wrapping = fyne.TextWrapWord
-	logScroll := container.NewVScroll(logLabel)
+	// A read-only multi-line Entry (not a Label) so the log is selectable and
+	// copyable by the user.
+	logEntry := widget.NewMultiLineEntry()
+	logEntry.Wrapping = fyne.TextWrapWord
+	logEntry.Disable() // read-only, but text stays selectable/copyable
+	logScroll := container.NewVScroll(logEntry)
 
 	refreshLog := func() {
 		logMu.Lock()
 		lines := append([]string{}, allLines...)
 		logMu.Unlock()
-		logLabel.SetText(strings.Join(lines, "\n"))
+		logEntry.SetText(strings.Join(lines, "\n"))
 		logScroll.ScrollToBottom()
 	}
 
@@ -304,15 +308,44 @@ func Run() {
 		engine = tunnel.NewEngine(net.JoinHostPort(addr, strconv.Itoa(port)), user, pass, mode, logger, setStatus)
 		stopCh = make(chan struct{})
 		go engine.Run(stopCh)
-		if ln, lerr := tunnel.StartSocksServer(socksPort, engine, router, logger); lerr != nil {
-			appendLog("Failed to start SOCKS server: " + lerr.Error())
-		} else {
-			socksLn = ln
+		var socksErr, httpErr error
+		socksLn, socksErr = tunnel.StartSocksServer(socksPort, engine, router, logger)
+		if socksErr != nil {
+			appendLog("Failed to start SOCKS server: " + socksErr.Error())
 		}
-		if ln, lerr := tunnel.StartHTTPProxyServer(httpPort, engine, router, logger); lerr != nil {
-			appendLog("Failed to start HTTP proxy server: " + lerr.Error())
-		} else {
-			httpLn = ln
+		httpLn, httpErr = tunnel.StartHTTPProxyServer(httpPort, engine, router, logger)
+		if httpErr != nil {
+			appendLog("Failed to start HTTP proxy server: " + httpErr.Error())
+		}
+
+		// If neither proxy could bind, there is nothing useful to run:
+		// stop the engine, re-enable the form, and tell the user. Done on
+		// the main thread so it overrides any pending "connected" callback.
+		if socksErr != nil && httpErr != nil {
+			if stopCh != nil {
+				close(stopCh)
+			}
+			engine = nil
+			fyne.Do(func() {
+				for _, f := range fields {
+					f.Enable()
+				}
+				setStatus(tunnel.StatusDisconnected)
+				dialog.ShowError(fmt.Errorf("Could not start the proxy:\n%s\n%s", socksErr.Error(), httpErr.Error()), w)
+			})
+			return
+		}
+		// Partial failure: warn but keep the working proxy running.
+		if socksErr != nil || httpErr != nil {
+			var msg string
+			if socksErr != nil {
+				msg = socksErr.Error()
+			} else {
+				msg = httpErr.Error()
+			}
+			fyne.Do(func() {
+				dialog.ShowInformation("Proxy warning", "One proxy failed to bind:\n"+msg, w)
+			})
 		}
 
 		running = true

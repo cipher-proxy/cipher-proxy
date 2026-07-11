@@ -233,10 +233,16 @@ func Run() {
 		httpLn  net.Listener
 		stopCh  chan struct{}
 		running bool
+		// ignoreConnected is set once a bind failure has occurred, so a late
+		// "connected" callback from the engine (the SSH tunnel came up) does
+		// not override the Disconnected status shown with the error dialog.
+		ignoreConnected bool
 	)
 
 	setStatus := func(s tunnel.Status) {
-		fyne.Do(func() {
+		if s == tunnel.StatusConnected && ignoreConnected {
+			return
+		}
 			switch s {
 			case tunnel.StatusConnected:
 				statusDot.FillColor = colorGreen
@@ -247,13 +253,12 @@ func Run() {
 				statusLabel.Text = "Retrying"
 				statusLabel.Color = colorOrange
 			case tunnel.StatusDisconnected:
-				statusDot.FillColor = colorRed
-				statusLabel.Text = "Disconnected"
-				statusLabel.Color = colorRed
-			}
-			statusDot.Refresh()
-			statusLabel.Refresh()
-		})
+			statusDot.FillColor = colorRed
+			statusLabel.Text = "Disconnected"
+			statusLabel.Color = colorRed
+		}
+		statusDot.Refresh()
+		statusLabel.Refresh()
 	}
 
 	buildSettings := func() *config.Settings {
@@ -318,31 +323,34 @@ func Run() {
 			appendLog("Failed to start HTTP proxy server: " + httpErr.Error())
 		}
 
-		// If neither proxy could bind, there is nothing useful to run:
-		// stop the engine, re-enable the form, and tell the user. Done on
-		// the main thread so it overrides any pending "connected" callback.
-		if socksErr != nil && httpErr != nil {
-			if stopCh != nil {
-				close(stopCh)
-			}
-			engine = nil
-			fyne.Do(func() {
-				for _, f := range fields {
-					f.Enable()
-				}
-				setStatus(tunnel.StatusDisconnected)
-				dialog.ShowError(fmt.Errorf("Could not start the proxy:\n%s\n%s", socksErr.Error(), httpErr.Error()), w)
-			})
-			return
-		}
-		// Partial failure: warn but keep the working proxy running.
+		// Any bind failure: the proxy is not fully up, so the status must
+		// NOT read "Connected". Ignore later "connected" callbacks from the
+		// engine and force the status to Disconnected.
 		if socksErr != nil || httpErr != nil {
+			ignoreConnected = true
+			if socksErr != nil && httpErr != nil {
+				// Nothing works: stop the engine and re-enable the form.
+				if stopCh != nil {
+					close(stopCh)
+				}
+				engine = nil
+				fyne.Do(func() {
+					for _, f := range fields {
+						f.Enable()
+					}
+					setStatus(tunnel.StatusDisconnected)
+					dialog.ShowError(fmt.Errorf("Could not start the proxy:\n%s\n%s", socksErr.Error(), httpErr.Error()), w)
+				})
+				return
+			}
+			// One proxy still works: keep it running, just warn the user.
 			var msg string
 			if socksErr != nil {
 				msg = socksErr.Error()
 			} else {
 				msg = httpErr.Error()
 			}
+			setStatus(tunnel.StatusDisconnected)
 			fyne.Do(func() {
 				dialog.ShowInformation("Proxy warning", "One proxy failed to bind:\n"+msg, w)
 			})

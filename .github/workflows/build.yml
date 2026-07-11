@@ -45,7 +45,19 @@ jobs:
         with:
           go-version: '1.26.4'
 
-      # --- Linux arm64 needs a CGO cross toolchain ---
+      # --- Linux needs GTK3 + OpenGL dev packages for Fyne's CGO ---
+      - name: Install Linux CGO dependencies
+        if: matrix.goos == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc pkg-config libc6-dev \
+            libgtk-3-dev libglib2.0-dev libgdk-pixbuf2.0-dev \
+            libgl1-mesa-dev libx11-dev libxext-dev \
+            libxcursor-dev libxrandr-dev libxinerama-dev \
+            libxi-dev libxxf86vm-dev
+
+      # --- Linux arm64 needs a CGO cross toolchain (GTK dev pkgs above) ---
       - name: Install CGO toolchain (Linux arm64)
         if: matrix.goos == 'linux' && matrix.goarch == 'arm64'
         run: |

@@ -62,12 +62,15 @@ jobs:
         if: matrix.goos == 'linux' && matrix.goarch == 'arm64'
         run: |
           sudo dpkg --add-architecture arm64
-          sudo apt-get update
+          # ARM64 Ubuntu packages live on ports.ubuntu.com (not security.ubuntu.com).
+          echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/arm64-ports.list
+          sudo apt-get update || true
           sudo apt-get install -y gcc-aarch64-linux-gnu \
             libgtk-3-dev:arm64 libglib2.0-dev:arm64 libgdk-pixbuf2.0-dev:arm64 \
             libgl1-mesa-dev:arm64 libx11-dev:arm64 libxext-dev:arm64 \
             libxcursor-dev:arm64 libxrandr-dev:arm64 libxinerama-dev:arm64 \
             libxi-dev:arm64 libxxf86vm-dev:arm64
+          sudo rm -f /etc/apt/sources.list.d/arm64-ports.list
 
       # --- Windows needs MinGW for Fyne's CGO (OpenGL) ---
       - name: Install CGO toolchain (Windows MinGW)

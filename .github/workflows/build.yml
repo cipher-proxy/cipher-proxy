@@ -90,6 +90,7 @@ jobs:
             export CC="x86_64-w64-mingw32-gcc"
           elif [ "${{ matrix.goarch }}" = "arm64" ]; then
             export CC="aarch64-linux-gnu-gcc"
+            export PKG_CONFIG_PATH="/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig"
           fi
           go build -trimpath -ldflags "-s -w" -o "${{ matrix.out }}" .
 

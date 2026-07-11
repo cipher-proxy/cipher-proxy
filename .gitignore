@@ -1,0 +1,16 @@
+# Build plan / AI task files
+plan.md
+reports/
+
+# Secrets / local config
+.sec
+.sec2
+config.json
+
+# Build artifacts
+cipherproxy
+cipherproxy.exe
+*.exe
+
+# Logs
+*.log

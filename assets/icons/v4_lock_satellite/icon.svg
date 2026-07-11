@@ -1,0 +1,33 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg4" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#042f2e"/>
+      <stop offset="100%" stop-color="#065f46"/>
+    </linearGradient>
+    <linearGradient id="globeGrad4" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#5eead4"/>
+      <stop offset="100%" stop-color="#22d3ee"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="256" height="256" rx="52" fill="url(#bg4)"/>
+
+  <g transform="rotate(-10 128 136)">
+    <path d="M38 136 A90 26 0 0 0 218 136" fill="none" stroke="#5eead4" stroke-width="4" opacity="0.35"/>
+
+    <!-- thin outline-only globe, no fill, minimal grid -->
+    <circle cx="128" cy="136" r="60" fill="none" stroke="url(#globeGrad4)" stroke-width="5"/>
+    <ellipse cx="128" cy="136" rx="23" ry="60" fill="none" stroke="url(#globeGrad4)" stroke-width="3" opacity="0.75"/>
+    <line x1="68" y1="136" x2="188" y2="136" stroke="url(#globeGrad4)" stroke-width="3" opacity="0.75"/>
+
+    <path d="M38 136 A90 26 0 0 1 218 136" fill="none" stroke="#5eead4" stroke-width="5"/>
+
+    <!-- satellite itself shaped as a tiny padlock riding the front arc -->
+    <g transform="translate(204,154) rotate(20)">
+      <path d="M-6 -8 V-13 C-6 -17 -3 -19 0 -19 C3 -19 6 -17 6 -13 V-8"
+            fill="none" stroke="#f0fdfa" stroke-width="3.5" stroke-linecap="round"/>
+      <rect x="-9" y="-9" width="18" height="15" rx="3" fill="#f0fdfa"/>
+      <circle cx="0" cy="-2.5" r="2.4" fill="#065f46"/>
+    </g>
+  </g>
+</svg>

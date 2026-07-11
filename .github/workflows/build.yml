@@ -11,7 +11,26 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -21,30 +40,75 @@ jobs:
         with:
           go-version: '1.26.4'
 
-      - name: Install fyne-cross
-        run: go install github.com/fyne-io/fyne-cross@latest
-
-      - name: Build all targets (linux amd64/arm64, windows amd64, darwin amd64/arm64)
-        run: fyne-cross linux/amd64 linux/arm64 windows/amd64 darwin/amd64 darwin/arm64
-
-      - name: Prepare release assets
+      - name: Install CGO toolchain (Linux arm64 cross)
+        if: matrix.goos == 'linux' && matrix.goarch == 'arm64'
         run: |
-          mkdir -p dist
-          cp fyne-cross/bin/linux-amd64/cipherproxy   dist/cipherproxy-linux-amd64
-          cp fyne-cross/bin/linux-arm64/cipherproxy   dist/cipherproxy-linux-arm64
-          cp fyne-cross/bin/windows-amd64/cipherproxy.exe dist/cipherproxy-windows-amd64.exe
-          ( cd fyne-cross/dist/darwin-arm64 && zip -r -q ../../../dist/cipherproxy-darwin-arm64.zip "Cipher Proxy.app" )
-          ( cd fyne-cross/dist/darwin-amd64 && zip -r -q ../../../dist/cipherproxy-darwin-amd64.zip "Cipher Proxy.app" )
-          ls -la dist
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Install CGO toolchain (Windows MinGW)
+        if: matrix.goos == 'windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-gtk3
+
+      - name: Install Fyne CLI
+        run: go install fyne.io/fyne/v2/cmd/fyne@latest
+
+      - name: Build (macOS)
+        if: matrix.goos == 'darwin'
+        env:
+          FYNEPATH: ${{ github.workspace }}
+        run: |
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          fyne package -os darwin -arch ${{ matrix.goarch }} \
+            -icon assets/icons/v4_lock_satellite/png/icon_256.png \
+            -name "Cipher Proxy" -appVersion 1.0.0
+          cd "${{ github.workspace }}"
+          zip -r "cipherproxy-darwin-${{ matrix.goarch }}.zip" "Cipher Proxy.app"
+
+      - name: Build (Windows)
+        if: matrix.goos == 'windows'
+        shell: msys2 {0}
+        env:
+          CGO_ENABLED: "1"
+          CC: gcc
+        run: |
+          export PATH="/mingw64/bin:$(go env GOPATH)/bin:$PATH"
+          fyne package -os windows -icon assets/icons/v4_lock_satellite/png/icon_256.png -name "Cipher Proxy"
+          mv "Cipher Proxy.exe" "cipherproxy-windows-amd64.exe"
+
+      - name: Build (Linux)
+        if: matrix.goos == 'linux'
+        run: |
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          if [ "${{ matrix.goarch }}" = "arm64" ]; then
+            export CGO_ENABLED=1 GOARCH=arm64 CC=aarch64-linux-gnu-gcc
+          fi
+          fyne package -os linux -icon assets/icons/v4_lock_satellite/png/icon_256.png -name "Cipher Proxy"
+          mv "Cipher Proxy" "cipherproxy-linux-${{ matrix.goarch }}"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: cipherproxy-builds
-          path: dist/*
+          name: cipherproxy-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            cipherproxy-linux-amd64
+            cipherproxy-linux-arm64
+            cipherproxy-windows-amd64.exe
+            cipherproxy-darwin-amd64.zip
+            cipherproxy-darwin-arm64.zip
+          if-no-files-found: ignore
 
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*
+          files: |
+            cipherproxy-linux-amd64
+            cipherproxy-linux-arm64
+            cipherproxy-windows-amd64.exe
+            cipherproxy-darwin-amd64.zip
+            cipherproxy-darwin-arm64.zip

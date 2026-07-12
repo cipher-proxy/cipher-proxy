@@ -1,0 +1,139 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*', 'sunrise', 'morning']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            out: cipherproxy-linux-amd64
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+            out: cipherproxy-linux-arm64
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            out: cipherproxy-windows-amd64.exe
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+            out: cipherproxy-darwin-amd64.zip
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            out: cipherproxy-darwin-arm64.zip
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.goarch == 'arm64' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.4'
+
+      # --- Linux needs GTK3 + OpenGL dev packages for Fyne's CGO ---
+      - name: Install Linux CGO dependencies
+        if: matrix.goos == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc pkg-config libc6-dev \
+            libgtk-3-dev libglib2.0-dev libgdk-pixbuf2.0-dev \
+            libgl1-mesa-dev libx11-dev libxext-dev \
+            libxcursor-dev libxrandr-dev libxinerama-dev \
+            libxi-dev libxxf86vm-dev
+
+      # --- Linux arm64 needs a CGO cross toolchain + ARM64 GTK libs ---
+      - name: Install CGO toolchain (Linux arm64)
+        if: matrix.goos == 'linux' && matrix.goarch == 'arm64'
+        run: |
+          sudo dpkg --add-architecture arm64
+          # ARM64 Ubuntu packages live on ports.ubuntu.com (not security.ubuntu.com).
+          echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/arm64-ports.list
+          sudo apt-get update || true
+          sudo apt-get install -y gcc-aarch64-linux-gnu \
+            libgtk-3-dev:arm64 libglib2.0-dev:arm64 libgdk-pixbuf2.0-dev:arm64 \
+            libgl1-mesa-dev:arm64 libx11-dev:arm64 libxext-dev:arm64 \
+            libxcursor-dev:arm64 libxrandr-dev:arm64 libxinerama-dev:arm64 \
+            libxi-dev:arm64 libxxf86vm-dev:arm64
+          sudo rm -f /etc/apt/sources.list.d/arm64-ports.list
+
+      # --- Windows needs MinGW for Fyne's CGO (OpenGL) ---
+      - name: Install CGO toolchain (Windows MinGW)
+        if: matrix.goos == 'windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: mingw-w64-x86_64-gcc
+
+      - name: Build Linux / Windows binary
+        if: matrix.goos != 'darwin'
+        shell: bash
+        env:
+          CGO_ENABLED: "1"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            export CC="x86_64-w64-mingw32-gcc"
+          elif [ "${{ matrix.goarch }}" = "arm64" ]; then
+            export CC="aarch64-linux-gnu-gcc"
+            export PKG_CONFIG_PATH="/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig"
+          fi
+          go build -trimpath -ldflags "-s -w" -o "${{ matrix.out }}" .
+
+      - name: Assemble macOS .app bundle
+        if: matrix.goos == 'darwin'
+        run: |
+          go build -trimpath -ldflags "-s -w" -o "Cipher Proxy" .
+          APP="Cipher Proxy.app"
+          rm -rf "$APP"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          mv "Cipher Proxy" "$APP/Contents/MacOS/Cipher Proxy"
+          cp assets/icons/v4_lock_satellite/png/icon_256.png "$APP/Contents/Resources/AppIcon.png"
+          cat > "$APP/Contents/Info.plist" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key><string>Cipher Proxy</string>
+            <key>CFBundleDisplayName</key><string>Cipher Proxy</string>
+            <key>CFBundleExecutable</key><string>Cipher Proxy</string>
+            <key>CFBundleIconFile</key><string>AppIcon</string>
+            <key>CFBundleIdentifier</key><string>com.cipherproxy.app</string>
+            <key>CFBundleVersion</key><string>1.0.0</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>LSMinimumSystemVersion</key><string>11.0</string>
+          </dict>
+          </plist>
+          PLIST
+          zip -r "${{ matrix.out }}" "$APP"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cipherproxy-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: ${{ matrix.out }}
+          if-no-files-found: ignore
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.out }}
